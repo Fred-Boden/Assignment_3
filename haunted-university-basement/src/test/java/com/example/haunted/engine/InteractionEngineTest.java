@@ -16,6 +16,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 class InteractionEngineTest {
 
     private InteractionEngine engine;
+    private GameEngine gameEngine;
     private Inventory inventory;
     private Player player;
     private Room room;
@@ -35,7 +36,23 @@ class InteractionEngineTest {
         room = new Room("room1", "Lecture Hall", "An empty classroom");
         player.setCurrentRoom(room);
         quest = new Quest("Recover Gradebook", "Find it and defeat phantom");
+        gameEngine = new GameEngine(player, quest, null, null, engine);
     }
+    
+    @Test
+    void mainCanBeConstructed() {
+        assertNotNull(new com.example.haunted.Main());
+    }
+    
+    @Test
+    void mainRunsWithoutErrors() {
+        assertDoesNotThrow(() ->
+            com.example.haunted.Main.main(new String[0])
+        );
+    }
+    
+    @Test
+    void playerReturnsNameProvidedAtConstruction() { assertEquals("Student", player.getName()); }
 
     @ParameterizedTest
     @CsvSource({
@@ -248,5 +265,183 @@ class InteractionEngineTest {
         assertEquals(17, player.getAttackPower());
         assertEquals(9, player.getDefensePower());
         assertEquals(List.of(potion), inventory.getItems());
+    }
+    
+    @Test
+    void gameEnginePickUpTransfersItemAndUpdatesQuest() {
+        Item gradebook = new TestItem("Lost Gradebook");
+        room.addItem(gradebook);
+        quest.markPhantomDefeated();
+
+        InteractionResult result =
+            gameEngine.pickUpItem("Lost Gradebook");
+
+        assertNotNull(result);
+        assertTrue(result.isSuccess());
+        assertEquals("Picked up Lost Gradebook.", result.getMessage());
+        assertEquals(List.of(gradebook), inventory.getItems());
+        assertTrue(room.getItems().isEmpty());
+        assertTrue(quest.isGradebookRecovered());
+        assertTrue(quest.isPhantomDefeated());
+        assertEquals(QuestStatus.COMPLETED, quest.getStatus());
+        assertTrue(quest.isComplete());
+    }
+    
+    @Test
+    void gameEngineEquipUpdatesWeaponAndAttack() {
+        Weapon sword = new Weapon("Rusty Sword", "An old sword", 7);
+        inventory.addItem(sword);
+
+        InteractionResult result =
+            gameEngine.equipItem("Rusty Sword");
+
+        assertNotNull(result);
+        assertTrue(result.isSuccess());
+        assertEquals("Equipped weapon Rusty Sword.", result.getMessage());
+        assertSame(sword, player.getEquippedWeapon());
+        assertEquals(17, player.getAttackPower());
+        assertEquals(List.of(sword), inventory.getItems());
+    }
+    
+    @Test
+    void gameEngineUseHealsAndConsumesPotion() {
+        Potion potion =
+            new Potion("Coffee Potion", "Restores health", 20);
+        inventory.addItem(potion);
+        player.takeDamage(40);
+        assertEquals(60, player.getHealth());
+
+        InteractionResult result =
+            gameEngine.useItem("Coffee Potion");
+
+        assertNotNull(result);
+        assertTrue(result.isSuccess());
+        assertEquals("Used Coffee Potion.", result.getMessage());
+        assertEquals(80, player.getHealth());
+        assertTrue(inventory.getItems().isEmpty());
+    }
+    
+    @Test
+    void gameEngineUnlockFailsWithoutConnectedRoom() {
+        // No exits were added to this room.
+        Direction direction = Direction.values()[0];
+
+        InteractionResult result =
+            gameEngine.unlockRoom(direction);
+
+        assertNotNull(result);
+        assertFalse(result.isSuccess());
+        assertSame(room, player.getCurrentRoom());
+        assertTrue(inventory.getItems().isEmpty());
+        assertEquals(QuestStatus.NOT_STARTED, quest.getStatus());
+    }
+    
+    @Test
+    void gameEngineReturnsOriginalQuest() { assertSame(quest, gameEngine.getQuest()); }
+    
+    @Test
+    void gameIsNotWonWhenQuestIsIncomplete() {
+        assertTrue(player.isAlive());
+        assertFalse(quest.isComplete());
+        assertFalse(gameEngine.isGameWon());
+    }
+    
+    @Test
+    void gameIsWonWhenQuestIsCompleteAndPlayerIsAlive() {
+        room.addItem(new TestItem("Lost Gradebook"));
+        quest.markPhantomDefeated();
+        gameEngine.pickUpItem("Lost Gradebook");
+
+        assertTrue(quest.isComplete());
+        assertTrue(player.isAlive());
+        assertTrue(gameEngine.isGameWon());
+    }
+    
+    @Test
+    void gameIsNotWonWhenQuestIsCompleteButPlayerIsDead() {
+        room.addItem(new TestItem("Lost Gradebook"));
+        quest.markPhantomDefeated();
+        gameEngine.pickUpItem("Lost Gradebook");
+        player.takeDamage(100);
+
+        assertTrue(quest.isComplete());
+        assertFalse(player.isAlive());
+        assertFalse(gameEngine.isGameWon());
+    }
+    
+    @Test
+    void unlockingAlreadyUnlockedRoomSucceeds() {
+        Room target = new Room("room2", "Library", "Dusty books");
+        room.connect(Direction.EAST, target);
+
+        InteractionResult result = engine.unlockRoom(player, Direction.EAST);
+
+        assertTrue(result.isSuccess());
+        assertEquals("The room is already unlocked.", result.getMessage());
+        assertFalse(target.isLocked());
+        assertSame(room, player.getCurrentRoom());
+    }
+    
+    @Test
+    void unlockingRoomWithoutRequiredKeyNameFails() {
+        Room target = new Room("room2", "Library", "Dusty books");
+        target.setLocked(true, null);
+        room.connect(Direction.EAST, target);
+
+        InteractionResult result = engine.unlockRoom(player, Direction.EAST);
+
+        assertFalse(result.isSuccess());
+        assertEquals("The room cannot be unlocked.", result.getMessage());
+        assertTrue(target.isLocked());
+    }
+    
+    @Test
+    void unlockingRoomWithoutKeyFails() {
+        Room target = new Room("room2", "Library", "Dusty books");
+        target.setLocked(true, "Library Key");
+        room.connect(Direction.EAST, target);
+
+        InteractionResult result = engine.unlockRoom(player, Direction.EAST);
+
+        assertFalse(result.isSuccess());
+        assertEquals("You do not have the correct key.", result.getMessage());
+        assertTrue(target.isLocked());
+        assertTrue(inventory.getItems().isEmpty());
+    }
+    
+    @Test
+    void ordinaryItemWithMatchingKeyNameCannotUnlockRoom() {
+        Room target = new Room("room2", "Library", "Dusty books");
+        target.setLocked(true, "Library Key");
+        room.connect(Direction.EAST, target);
+
+        Item fakeKey = new TestItem("Library Key");
+        inventory.addItem(fakeKey);
+
+        InteractionResult result = engine.unlockRoom(player, Direction.EAST);
+
+        assertFalse(result.isSuccess());
+        assertEquals("You do not have the correct key.", result.getMessage());
+        assertTrue(target.isLocked());
+        assertEquals(List.of(fakeKey), inventory.getItems());
+    }
+    
+    @Test
+    void correctKeyUnlocksRoomAndRemainsInInventory() {
+        Room target = new Room("room2", "Library", "Dusty books");
+        target.setLocked(true, "Library Key");
+        room.connect(Direction.EAST, target);
+
+        Key key = new Key("Library Key", "Opens the library");
+        inventory.addItem(key);
+
+        InteractionResult result =
+            engine.unlockRoom(player, Direction.EAST);
+
+        assertTrue(result.isSuccess());
+        assertEquals("Unlocked Library.", result.getMessage());
+        assertFalse(target.isLocked());
+        assertEquals(List.of(key), inventory.getItems());
+        assertSame(room, player.getCurrentRoom());
     }
 }

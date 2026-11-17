@@ -14,12 +14,22 @@
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <junit.version>6.0.3</junit.version>
+        <pitest.version>1.22.1</pitest.version>
+        <pitest.junit5.version>1.2.3</pitest.junit5.version>
     </properties>
 
     <dependencies>
+        <!-- This dependency provides the JUnit Jupiter API, engine, and @ParameterizedTest support used by all test classes. -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- This dependency pins the JUnit Platform launcher to the same version as Jupiter so Pitest and Surefire discover and run the tests with a matching launcher. -->
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
             <version>${junit.version}</version>
             <scope>test</scope>
         </dependency>
@@ -39,6 +49,38 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
+            </plugin>
+
+            <!-- Pitest mutation testing. Run with: mvn clean test org.pitest:pitest-maven:mutationCoverage -->
+            <plugin>
+                <groupId>org.pitest</groupId>
+                <artifactId>pitest-maven</artifactId>
+                <version>${pitest.version}</version>
+                <dependencies>
+                    <!-- This dependency lets Pitest run JUnit 5+/Jupiter tests (Pitest only understands JUnit 4 without it). -->
+                    <dependency>
+                        <groupId>org.pitest</groupId>
+                        <artifactId>pitest-junit5-plugin</artifactId>
+                        <version>${pitest.junit5.version}</version>
+                    </dependency>
+                </dependencies>
+                <configuration>
+                    <targetClasses>
+                        <param>com.example.haunted.*</param>
+                    </targetClasses>
+                    <targetTests>
+                        <param>com.example.haunted.*</param>
+                    </targetTests>
+                    <!-- Produce all three report formats required by the assignment -->
+                    <outputFormats>
+                        <outputFormat>HTML</outputFormat>
+                        <outputFormat>CSV</outputFormat>
+                        <outputFormat>XML</outputFormat>
+                    </outputFormats>
+                    <!-- Write to target/pit-reports/ directly instead of a timestamped sub-folder -->
+                    <timestampedReports>false</timestampedReports>
+                    <threads>4</threads>
+                </configuration>
             </plugin>
         </plugins>
     </build>
